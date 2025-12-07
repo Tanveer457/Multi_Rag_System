@@ -1,0 +1,14 @@
+[project]
+name = "localrag"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "google-genai>=1.52.0",
+    "gradio>=6.0.2",
+    "langchain>=1.1.0",
+    "opensearch-py>=3.1.0",
+    "python-dotenv>=1.2.1",
+    "unstructured[pdf]>=0.18.20",
+]
