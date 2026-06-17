@@ -84,9 +84,10 @@ source .venv/bin/activate
 
 **Install dependencies:**
 ```bash
-# Ensure UV or pip is updated
-pip install -r requirements.txt
-# If using pyproject.toml
+# Using uv (recommended)
+uv sync
+
+# Alternatively, using standard pip
 pip install -e .
 ```
 
