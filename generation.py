@@ -1,41 +1,34 @@
 import json
 import os
-from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+import ollama
 from langchain_core.prompts import PromptTemplate
 
+# =====================================================================
+#  CONFIG & SETUP
+# =====================================================================
+
+# ---------------------------------------------------------------------
+#  CRITICAL: LOCAL MODEL CONFIGURATION
+# ---------------------------------------------------------------------
+# We ignore whatever model name comes from the frontend 
+# and force the use of your local downloaded model.
+LOCAL_MODEL_NAME = "qwen2:0.5b"
+
 # Import retrieval functions
-# Ensure these exist in your 'retrieval.py' file or comment them out if testing locally without them
+# We assume 'retrieval.py' exists and connects to OpenSearch as you mentioned.
 try:
     from retrieval import hybrid_search, keyword_search, semantic_search
 except ImportError:
-    print("⚠ Warning: 'retrieval' module not found. Mocking search functions for testing.")
+    print("⚠ Warning: 'retrieval' module not found. Please ensure retrieval.py is present.")
+    # Fallback mocks to prevent crash if file is missing during testing
     def hybrid_search(*args, **kwargs): return []
     def keyword_search(*args, **kwargs): return []
     def semantic_search(*args, **kwargs): return []
 
-# Load environment variables
-load_dotenv()
-
-# Configure Gemini API with validation
-gemini_api_key = os.getenv("GEMINI_API_KEY")
-if not gemini_api_key:
-    print("✗ ERROR: GEMINI_API_KEY not found in environment variables")
-    print("Please set GEMINI_API_KEY in your .env file")
-    # For safety in this example, we don't raise immediately to allow code inspection, 
-    # but in production, you should raise ValueError here.
-    # raise ValueError("GEMINI_API_KEY environment variable not set.")
-    client = None
-else:
-    print(f"✓ Configuring Gemini with API key: {gemini_api_key[:10]}...")
-    client = genai.Client(api_key=gemini_api_key)
-
 # Define RAG prompt template
-RAG_PROMPT_TEMPLATE = """You are an expert AI assistant specialized in Retrieval-Augmented Generation (RAG) and Large Language Models.
+RAG_PROMPT_TEMPLATE = """You are an expert AI assistant specialized in Retrieval-Augmented Generation (RAG).
 
-Use the following retrieved documents to answer the user's question accurately and comprehensively.
-If the retrieved documents contain relevant information, use it to provide a well-structured answer.
+Use the following retrieved documents to answer the user's question accurately.
 If the documents don't contain relevant information, explicitly state that you don't have enough information.
 
 RETRIEVED DOCUMENTS:
@@ -46,9 +39,8 @@ USER QUESTION:
 
 INSTRUCTIONS:
 - Be accurate and cite the source documents when relevant
-- Structure your answer clearly with sections if needed
-- Be concise but comprehensive
-- If information is incomplete, acknowledge it
+- Keep the answer Explainable  but helpful
+- Do not make up information not present in the documents
 
 YOUR ANSWER:
 """
@@ -58,158 +50,95 @@ prompt_template = PromptTemplate(
     template=RAG_PROMPT_TEMPLATE,
 )
 
+# =====================================================================
+#  GENERATION FUNCTIONS (OLLAMA BACKEND)
+# =====================================================================
 
-def generate_with_gemini_streaming(prompt_text, model_name="gemini-2.0-flash"):
+def generate_with_gemini_streaming(prompt_text, model_name="ignored"):
     """
-    Generate response using Google's Gemini API with streaming.
+    Generate response using Local Ollama (Replacing Gemini).
     
     Args:
         prompt_text (str): The formatted prompt text
-        model_name (str): Gemini model to use
+        model_name (str): Accepted for compatibility with app.py, but ignored.
     
     Returns:
         generator: Streaming text chunks
     """
-    if not client:
-        yield "Error: Client not initialized."
-        return
-
     try:
-        print("✓ Streaming response generation started...")
+        print(f"✓ Streaming with Local Ollama ({LOCAL_MODEL_NAME})...")
         
-        # Create prompt part
-        prompt_part = types.Part.from_text(text=prompt_text)
-
-        # FIX: Use generate_content_stream and remove stream=True argument
-        response_stream = client.models.generate_content_stream(
-            model=model_name,
-            contents=[prompt_part],
-            config=types.GenerateContentConfig(
-                temperature=0.7,
-                top_p=0.95,
-                top_k=40,
-                max_output_tokens=2048,
-                safety_settings=[
-                    types.SafetySetting(
-                        category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
-                    ),
-                    types.SafetySetting(
-                        category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
-                    ),
-                    types.SafetySetting(
-                        category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
-                    ),
-                    types.SafetySetting(
-                        category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
-                    ),
-                ],
-            )
+        # Stream from Ollama
+        stream = ollama.chat(
+            model=LOCAL_MODEL_NAME,
+            messages=[{'role': 'user', 'content': prompt_text}],
+            stream=True,
         )
 
-        for chunk in response_stream:
-            if hasattr(chunk, 'text') and chunk.text:
-                yield chunk.text
+        for chunk in stream:
+            # Ollama returns chunks like {'message': {'content': 'text...'}}
+            content = chunk.get('message', {}).get('content', '')
+            if content:
+                yield content
                         
     except Exception as e:
-        error_msg = f"✗ Error with Gemini streaming: {str(e)}"
+        error_msg = f"✗ Error with Local Ollama: {str(e)}"
         print(error_msg)
         yield error_msg
 
 
-def generate_with_gemini(prompt_text, model_name="gemini-2.0-flash"):
+def generate_with_gemini(prompt_text, model_name="ignored"):
     """
-    Generate response using Google's Gemini API (non-streaming).
+    Generate response using Local Ollama (Non-streaming).
     
     Args:
         prompt_text (str): The formatted prompt text
-        model_name (str): Gemini model to use
-    
+        model_name (str): Accepted for compatibility with app.py, but ignored.
+        
     Returns:
         str: Response text
     """
-    if not client:
-        return "Error: Client not initialized."
-
     try:
-        print("✓ Requesting non-streaming response...")
+        print(f"✓ Generating with Local Ollama ({LOCAL_MODEL_NAME})...")
 
-        # Validate prompt length
-        if len(prompt_text) > 100000:
-            print(f"⚠ Warning: Prompt is {len(prompt_text)} characters. Truncating to 100000...")
-            prompt_text = prompt_text[:100000] + "\n\n[Content truncated due to length]"
-
-        # Create prompt part
-        prompt_part = types.Part.from_text(text=prompt_text)
-
-        response = client.models.generate_content(
-            model=model_name,
-            contents=[prompt_part],
-            config=types.GenerateContentConfig(
-                temperature=0.7,
-                top_p=0.95,
-                top_k=40,
-                max_output_tokens=2048,
-                safety_settings=[
-                    types.SafetySetting(
-                        category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
-                    ),
-                    types.SafetySetting(
-                        category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
-                    ),
-                    types.SafetySetting(
-                        category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
-                    ),
-                    types.SafetySetting(
-                        category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
-                    ),
-                ],
-            ),
+        response = ollama.chat(
+            model=LOCAL_MODEL_NAME,
+            messages=[{'role': 'user', 'content': prompt_text}],
+            stream=False,
         )
 
-        if hasattr(response, 'text') and response.text:
-            return response.text
-        else:
-            return "⚠ No response generated. The model may have blocked the request."
+        # Extract content
+        return response['message']['content']
 
     except Exception as e:
-        error_msg = f"✗ Error with Gemini generation: {str(e)}"
+        error_msg = f"✗ Error with Local Ollama: {str(e)}"
         print(error_msg)
         return error_msg
 
 
-def generate_rag_response(
-    query, search_type="hybrid", top_k=5, stream=False
-):
+def generate_rag_response(query, search_type="hybrid", top_k=5, stream=False):
     """
-    Generate RAG response using retrieved chunks from OpenSearch.
+    Generate RAG response using retrieved chunks from OpenSearch and Local Ollama.
 
     Args:
         query (str): User's question
-        search_type (str): Type of search - 'keyword', 'semantic', or 'hybrid' (default)
-        top_k (int): Number of documents to retrieve (default: 5)
-        stream (bool): Whether to stream the response (default: False)
+        search_type (str): Type of search - 'keyword', 'semantic', or 'hybrid'
+        top_k (int): Number of documents to retrieve
+        stream (bool): Whether to stream the response
 
     Returns:
         str or generator: Generated response or streaming generator
     """
     try:
         print(f"\n{'='*80}")
-        print(f"RAG GENERATION PIPELINE")
+        print(f"LOCAL RAG PIPELINE ({LOCAL_MODEL_NAME})")
         print(f"{'='*80}")
         print(f"Query: {query}")
         print(f"Search Type: {search_type}")
         print(f"Top K: {top_k}")
         print(f"Streaming: {stream}\n")
 
-        # Step 1: Retrieve relevant documents
+        # Step 1: Retrieve relevant documents (from retrieval.py/OpenSearch)
         print("Step 1: Retrieving relevant documents...")
         if search_type == "keyword":
             results = keyword_search(query, top_k=top_k)
@@ -251,18 +180,19 @@ Content:
         print(f"✓ Formatted {len(contexts)} contexts\n")
 
         # Step 4: Format the prompt
-        print("Step 3: Formatting prompt for Gemini...")
+        print(f"Step 3: Formatting prompt for {LOCAL_MODEL_NAME}...")
         prompt_text = prompt_template.format(context=context_text, question=query)
         print(f"✓ Prompt size: {len(prompt_text)} characters\n")
 
-        # Step 5: Generate response with Gemini
-        print("Step 4: Generating response with Gemini...\n")
+        # Step 5: Generate response
+        print(f"Step 4: Generating response with {LOCAL_MODEL_NAME}...\n")
         print("="*80)
         
+        # We pass "ignored" for model_name because we hardcoded LOCAL_MODEL_NAME above
         if stream:
-            return generate_with_gemini_streaming(prompt_text)
+            return generate_with_gemini_streaming(prompt_text, model_name="ignored")
         else:
-            result = generate_with_gemini(prompt_text)
+            result = generate_with_gemini(prompt_text, model_name="ignored")
             print("="*80)
             return result
 
@@ -277,7 +207,7 @@ def interactive_rag():
     Interactive RAG chat interface.
     """
     print("\n" + "="*80)
-    print("INTERACTIVE RAG CHATBOT")
+    print("INTERACTIVE RAG CHATBOT (LOCAL)")
     print("="*80)
     print("\nCommands:")
     print("  'exit' or 'quit' - Exit the chatbot")
@@ -295,8 +225,7 @@ def interactive_rag():
             if query.lower() == "help":
                 print("\nRAG Chatbot Help:")
                 print("- Ask questions about RAG and related topics")
-                print("- The system retrieves relevant documents and uses Gemini to answer")
-                print("- Responses are based on indexed PDF content")
+                print(f"- The system retrieves relevant documents and uses {LOCAL_MODEL_NAME} to answer")
                 continue
             
             if not query:
@@ -338,24 +267,12 @@ if __name__ == "__main__":
     print("EXAMPLE: RAG Response (Non-Streaming)")
     print("="*80)
     
-    # Non-streaming response - returns string directly
+    # Non-streaming response
     print("\n📚 GENERATING RESPONSE...\n")
     
-    response = generate_rag_response(query, search_type="hybrid", top_k=3, stream=False)
+    response = generate_rag_response(query, search_type="hybrid", top_k=1, stream=False)
     
     print("FINAL RESPONSE:")
     print("="*80)
     print(response)
     print("="*80)
-    
-    # To test streaming, uncomment below:
-    # print("\n" + "="*80)
-    # print("EXAMPLE: RAG Response (Streaming)")
-    # print("="*80)
-    # print("\n🔄 STREAMING RESPONSE:\n")
-    # for chunk in generate_rag_response(query, search_type="hybrid", top_k=3, stream=True):
-    #     print(chunk, end="", flush=True)
-    # print("\n" + "="*80)
-    
-    # To run interactive mode:
-    # interactive_rag()

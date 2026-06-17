@@ -1,10 +1,35 @@
-# Python-generated files
+# Python
 __pycache__/
-*.py[oc]
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual Environments
+.venv/
+.env
+venv/
+parsing.ipynb
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# IDE files
+.vscode/
+.idea/
+
+# Distribution
 build/
 dist/
-wheels/
-*.egg-info
+*.egg-info/
 
-# Virtual environments
-.venv
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Dependency lock files (optional)
+uv.lock
+poetry.lock
+Pipfile.lock
